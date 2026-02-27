@@ -199,9 +199,9 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
 
         epoch_loss = 0
 
-        train_iter = cycle(train_loader)
-
-        for step, batch_data in enumerate(islice(train_iter, ITERATIONS), 1):
+        for step, batch_data in enumerate(train_loader, 1):
+            if step > ITERATIONS:
+                break
             inputs, labels = (
                 batch_data["image"].to(device),
                 batch_data["label"].to(device),

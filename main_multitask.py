@@ -208,10 +208,10 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
         epoch_loss = 0
         epoch_loss_seg = 0
         epoch_loss_feat = 0
-        train_iter = cycle(train_loader)
-        # step = 0
-
-        for step, batch_data in enumerate(islice(train_iter, ITERATIONS), 1):
+        for step, batch_data in enumerate(train_loader, 1):
+            if step > ITERATIONS:
+                break
+            
             inputs, labels = (
                 batch_data["image"].to(device),
                 batch_data["label"].to(device),
@@ -384,7 +384,8 @@ if __name__ == "__main__":
         "Task10_Colon": 1,    
     }
 
-    for task in ["Task09_Spleen", "Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
+    # for task in ["Task09_Spleen", "Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
+    for task in ["Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
 
         print("-" * 20)
         print(f"Running task: {task}")
