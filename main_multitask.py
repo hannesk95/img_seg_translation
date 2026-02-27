@@ -116,16 +116,14 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     train_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
-            EnsureChannelFirstd(keys=["image", "label"]),            
+            EnsureChannelFirstd(keys=["image", "label"]),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
-            Compute3DFeaturesd(keys=["image"]),
+            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0),
+                    mode=("bilinear", "nearest")),
+            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+
+            # FIRST crop
             RandCropByLabelClassesd(
                 keys=["image", "label"],
                 label_key="label",
@@ -135,23 +133,25 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
                 image_key="image",
                 image_threshold=0,
             ),
-            EnsureTyped(keys=["image", "label"]),
+
+            # THEN compute features on patch
+            Compute3DFeaturesd(keys=["image"]),
+
+            EnsureTyped(keys=["image", "label", "features"]),
         ]
     )
 
     val_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
-            EnsureChannelFirstd(keys=["image", "label"]),            
+            EnsureChannelFirstd(keys=["image", "label"]),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
-            Compute3DFeaturesd(keys=["image"]),
+            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0),
+                    mode=("bilinear", "nearest")),
+            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+
+            # FIRST crop
             RandCropByLabelClassesd(
                 keys=["image", "label"],
                 label_key="label",
@@ -161,7 +161,11 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
                 image_key="image",
                 image_threshold=0,
             ),
-            EnsureTyped(keys=["image", "label"]),
+
+            # THEN compute features on patch
+            Compute3DFeaturesd(keys=["image"]),
+
+            EnsureTyped(keys=["image", "label", "features"]),
         ]
     )
 
