@@ -17,8 +17,8 @@ from monai.transforms import (
 )
 from monai.networks.nets import UNet
 from monai.networks.layers import Norm
-from monai.metrics import DiceMetric, DiceCELoss
-from monai.losses import DiceLoss
+from monai.metrics import DiceMetric
+from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, DataLoader, decollate_batch, Dataset, PersistentDataset
 from monai.apps import download_and_extract
