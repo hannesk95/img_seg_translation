@@ -35,6 +35,7 @@ import mlflow
 from monai.handlers.utils import from_engine
 from utils import set_deterministic, log_all_python_files
 from itertools import cycle, islice
+from monai.metrics import HausdorffDistanceMetric
 
 # ---------------------------
 # Custom Transform: 3D Features
@@ -113,6 +114,15 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     split_idx = int(0.8 * len(data_dicts))
     train_files, val_files = data_dicts[:split_idx], data_dicts[split_idx:]   
 
+    scaling = NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True) if task != "Task06_Lung" else ScaleIntensityRanged(
+                keys=["image"],
+                a_min=-1000,
+                a_max=400,
+                b_min=0.0,
+                b_max=1.0,
+                clip=True,
+            )
+
     train_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
@@ -121,7 +131,7 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             Orientationd(keys=["image", "label"], axcodes="RAS"),
             Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0),
                     mode=("bilinear", "nearest")),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+            scaling,
 
             # FIRST crop
             RandCropByLabelClassesd(
@@ -149,7 +159,7 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             Orientationd(keys=["image", "label"], axcodes="RAS"),
             Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0),
                     mode=("bilinear", "nearest")),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+            scaling,
 
             # FIRST crop
             RandCropByLabelClassesd(
@@ -189,6 +199,12 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     optimizer = torch.optim.SGD(model.parameters(), 1e-2, momentum=0.99, nesterov=True, weight_decay=3e-5)
     scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=EPOCHS, power=0.9)
     dice_metric = DiceMetric(include_background=False, reduction="mean")
+    hausdorff_metric = HausdorffDistanceMetric(
+        include_background=False,
+        reduction="mean",
+        percentile=95.0,   # HD95 (recommended)
+        get_not_nans=True  # avoids NaN if class missing
+    )
 
     lambda_feat = 0.05  # tune this carefully
 
@@ -293,19 +309,7 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             EnsureChannelFirstd(keys=["image", "label"]),
             Orientationd(keys=["image"], axcodes="RAS"),
             Spacingd(keys=["image"], pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
-            # ScaleIntensityRanged(
-            #     keys=["image"],
-            #     a_min=-57,
-            #     a_max=164,
-            #     b_min=0.0,
-            #     b_max=1.0,
-            #     clip=True,
-            # ),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
+            scaling,
             CropForegroundd(keys=["image"], source_key="image", allow_smaller=True),
         ]
     )
@@ -350,13 +354,23 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             # compute metric for current iteration
             dice_metric(y_pred=val_outputs, y=val_labels)
 
+            # Hausdorff (HD95)
+            hausdorff_metric(y_pred=val_outputs, y=val_labels)
+
         # aggregate the final mean dice result
         metric_org = dice_metric.aggregate().item()
         # reset the status for next validation round
         dice_metric.reset()
 
+        metric_hd95, _ = hausdorff_metric.aggregate()
+        metric_hd95 = metric_hd95.item()
+        hausdorff_metric.reset()
+
     print("Metric on original image spacing: ", metric_org)
+    print("Mean HD95 (mm, original spacing): ", metric_hd95)
+
     mlflow.log_metric("val_mean_dice_original_spacing", metric_org, step=EPOCHS)
+    mlflow.log_metric("val_mean_hd95_original_spacing", metric_hd95, step=EPOCHS)
 
 if __name__ == "__main__":
 
@@ -384,8 +398,7 @@ if __name__ == "__main__":
         "Task10_Colon": 1,    
     }
 
-    # for task in ["Task09_Spleen", "Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
-    for task in ["Task05_Prostate", "Task06_Lung"]:
+    for task in ["Task09_Spleen", "Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
 
         print("-" * 20)
         print(f"Running task: {task}")

@@ -34,6 +34,7 @@ import glob
 import mlflow
 from utils import set_deterministic, log_all_python_files
 from itertools import cycle, islice
+from monai.metrics import HausdorffDistanceMetric
 
 
 EPOCHS = 1000
@@ -61,35 +62,23 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     split_idx = int(0.8 * len(data_dicts))
     train_files, val_files = data_dicts[:split_idx], data_dicts[split_idx:]    
 
+    scaling = NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True) if task != "Task06_Lung" else ScaleIntensityRanged(
+                keys=["image"],
+                a_min=-1000,
+                a_max=400,
+                b_min=0.0,
+                b_max=1.0,
+                clip=True,
+            )
+
     train_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
             EnsureChannelFirstd(keys=["image", "label"]),
-            # ScaleIntensityRanged(
-            #     keys=["image"],
-            #     a_min=-57,
-            #     a_max=164,
-            #     b_min=0.0,
-            #     b_max=1.0,
-            #     clip=True,
-            # ),
             CropForegroundd(keys=["image", "label"], source_key="image", allow_smaller=True),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
             Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
-            # RandCropByPosNegLabeld(
-            #     keys=["image", "label"],
-            #     label_key="label",
-            #     spatial_size=patch_size,
-            #     num_samples=2,
-            #     max_samples_per_class=1,
-            #     image_key="image",
-            #     image_threshold=0,
-            # ),
+            scaling,
             RandCropByLabelClassesd(
                 keys=["image", "label"],
                 label_key="label",
@@ -114,31 +103,10 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
         [
             LoadImaged(keys=["image", "label"]),
             EnsureChannelFirstd(keys=["image", "label"]),
-            # ScaleIntensityRanged(
-            #     keys=["image"],
-            #     a_min=-57,
-            #     a_max=164,
-            #     b_min=0.0,
-            #     b_max=1.0,
-            #     clip=True,
-            # ),
             CropForegroundd(keys=["image", "label"], source_key="image", allow_smaller=True),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
             Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
-            # RandCropByPosNegLabeld(
-            #     keys=["image", "label"],
-            #     label_key="label",
-            #     spatial_size=(128, 128, 128),
-            #     num_samples=2,
-            #     max_samples_per_class=1,
-            #     image_key="image",
-            #     image_threshold=0,
-            # ),
+            scaling,
             RandCropByLabelClassesd(
                 keys=["image", "label"],
                 label_key="label",
@@ -183,6 +151,12 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     optimizer = torch.optim.SGD(model.parameters(), 1e-2, momentum=0.99, nesterov=True, weight_decay=3e-5)
     scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=EPOCHS, power=0.9)
     dice_metric = DiceMetric(include_background=False, reduction="mean")
+    hausdorff_metric = HausdorffDistanceMetric(
+        include_background=False,
+        reduction="mean",
+        percentile=95.0,   # HD95 (recommended)
+        get_not_nans=True  # avoids NaN if class missing
+    )
 
     val_interval = 2
     best_metric = -1
@@ -269,19 +243,7 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             EnsureChannelFirstd(keys=["image", "label"]),
             Orientationd(keys=["image"], axcodes="RAS"),
             Spacingd(keys=["image"], pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
-            # ScaleIntensityRanged(
-            #     keys=["image"],
-            #     a_min=-57,
-            #     a_max=164,
-            #     b_min=0.0,
-            #     b_max=1.0,
-            #     clip=True,
-            # ),
-            NormalizeIntensityd(
-                keys=["image"],
-                nonzero=True,
-                channel_wise=True
-            ),
+            scaling,
             CropForegroundd(keys=["image"], source_key="image", allow_smaller=True),
         ]
     )
@@ -314,19 +276,33 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
             val_inputs = val_data["image"].to(device)
             roi_size = patch_dict[task]
             sw_batch_size = 4
-            val_data["pred"] = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
+
+            val_data["pred"] = sliding_window_inference(
+                val_inputs, roi_size, sw_batch_size, model
+            )
+
             val_data = [post_transforms(i) for i in decollate_batch(val_data)]
             val_outputs, val_labels = from_engine(["pred", "label"])(val_data)
-            # compute metric for current iteration
+
+            # Dice
             dice_metric(y_pred=val_outputs, y=val_labels)
 
-        # aggregate the final mean dice result
-        metric_org = dice_metric.aggregate().item()
-        # reset the status for next validation round
+            # Hausdorff (HD95)
+            hausdorff_metric(y_pred=val_outputs, y=val_labels)
+
+        # ---- Aggregate Metrics ----
+        metric_dice = dice_metric.aggregate().item()
         dice_metric.reset()
 
-    print("Metric on original image spacing: ", metric_org)
-    mlflow.log_metric("val_mean_dice_original_spacing", metric_org, step=EPOCHS)
+        metric_hd95, _ = hausdorff_metric.aggregate()
+        metric_hd95 = metric_hd95.item()
+        hausdorff_metric.reset()
+
+    print("Mean Dice (original spacing): ", metric_dice)
+    print("Mean HD95 (mm, original spacing): ", metric_hd95)
+
+    mlflow.log_metric("val_mean_dice_original_spacing", metric_dice, step=EPOCHS)
+    mlflow.log_metric("val_mean_hd95_original_spacing", metric_hd95, step=EPOCHS)
 
 
 if __name__ == "__main__":
