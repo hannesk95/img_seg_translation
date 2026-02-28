@@ -224,9 +224,16 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
         epoch_loss = 0
         epoch_loss_seg = 0
         epoch_loss_feat = 0
-        for step, batch_data in enumerate(train_loader, 1):
-            if step > ITERATIONS:
-                break
+
+        step = 0
+
+        while step < ITERATIONS:
+
+        # for step, batch_data in enumerate(train_loader, 1):
+        #     if step > ITERATIONS:
+        #         break
+            step += 1
+            batch_data = next(iter(train_loader))
             
             inputs, labels = (
                 batch_data["image"].to(device),
