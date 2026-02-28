@@ -169,23 +169,26 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     for epoch in range(EPOCHS):
         print("-" * 10)
         print(f"epoch {epoch + 1}/{EPOCHS}")
+
         model.train()
 
         epoch_loss = 0
         step = 0
 
+        train_iter = iter(train_loader)   # ← create iterator ONCE per epoch
+
         while step < ITERATIONS:
+            try:
+                batch_data = next(train_iter)
+            except StopIteration:
+                # Dataset exhausted → start new pass (new shuffle if shuffle=True)
+                train_iter = iter(train_loader)
+                batch_data = next(train_iter)
 
-        # for step, batch_data in enumerate(train_loader, 1):
-        #     if step > ITERATIONS:
-        #         break
             step += 1
-            batch_data = next(iter(train_loader))
 
-            inputs, labels = (
-                batch_data["image"].to(device),
-                batch_data["label"].to(device),
-            )
+            inputs = batch_data["image"].to(device)
+            labels = batch_data["label"].to(device)
 
             optimizer.zero_grad()
             outputs = model(inputs)
