@@ -195,8 +195,8 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
     val_interval = 2
     best_metric = -1
 
-    post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
-    post_label = Compose([AsDiscrete(to_onehot=2)])
+    post_pred = Compose([AsDiscrete(argmax=True, to_onehot=n_classes)])
+    post_label = Compose([AsDiscrete(to_onehot=n_classes)])
 
     # ---------------------------
     # Training Loop
@@ -326,8 +326,8 @@ def main(task: str, n_classes: int, patch_size: tuple, n_channels: int):
                 to_tensor=True,
                 device="cpu",
             ),
-            AsDiscreted(keys="pred", argmax=True, to_onehot=2),
-            AsDiscreted(keys="label", to_onehot=2),
+            AsDiscreted(keys="pred", argmax=True, to_onehot=n_classes),
+            AsDiscreted(keys="label", to_onehot=n_classes),
         ]
     )
 
@@ -385,7 +385,7 @@ if __name__ == "__main__":
     }
 
     # for task in ["Task09_Spleen", "Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
-    for task in ["Task10_Colon", "Task05_Prostate", "Task06_Lung"]:
+    for task in ["Task05_Prostate", "Task06_Lung"]:
 
         print("-" * 20)
         print(f"Running task: {task}")
